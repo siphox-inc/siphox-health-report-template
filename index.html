@@ -1,0 +1,1787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Health Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .category {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .score {
+            font-size: 24px;
+        }
+
+        .category-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .biomarker {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .range-bar {
+            height: 8px;
+            background-color: #e9ecef;  /* gray for outside range */
+            border-radius: 4px;
+            margin: 5px 0;
+            position: relative;
+            width: 100%;
+        }
+
+        .range-optimal {
+            position: absolute;
+            height: 100%;
+            background-color: #007bff;  /* blue for inRange */
+        }
+
+        .range-good {
+            position: absolute;
+            height: 100%;
+            background-color: #ffd700;
+        }
+
+        .result-marker {
+            position: absolute;
+            width: 3px;               /* increased from 2px */
+            height: 24px;            /* increased from 16px */
+            background-color: #000;
+            top: -8px;              /* adjusted to center the larger marker */
+            transform: translateX(-50%);
+        }
+
+        .suggestions {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .suggestion {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-left: 3px solid #007bff;
+        }
+
+        .tag {
+            display: inline-block;
+            background-color: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-right: 5px;
+            margin-top: 5px;
+        }
+
+        .historic-value {
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+    <script>
+        // Function to process and display the report data
+        function displayReport(data) {
+            // Group biomarkers by category
+            const categories = {};
+            data.biomarker.forEach(biomarker => {
+                const categoryName = biomarker.category.name;
+                if (!categories[categoryName]) {
+                    categories[categoryName] = [];
+                }
+                categories[categoryName].push(biomarker);
+            });
+
+            // Create HTML for each category
+            const categoriesContainer = document.getElementById('categories');
+            for (const [categoryName, biomarkers] of Object.entries(categories)) {
+                // Find matching axis for the category
+                const axis = data.axes.find(a => a.axis === categoryName);
+                const categoryHTML = createCategoryHTML(categoryName, biomarkers, axis);
+                categoriesContainer.innerHTML += categoryHTML;
+            }
+
+            // Display suggestions
+            const suggestionsContainer = document.getElementById('suggestions');
+            data.suggestions.forEach(suggestion => {
+                suggestionsContainer.innerHTML += createSuggestionHTML(suggestion);
+            });
+        }
+
+        function createCategoryHTML(categoryName, biomarkers, axis) {
+            const score = axis ? axis.result : 'N/A';
+            const range = axis ? axis.range : '';
+            
+            // Define color based on range
+            let scoreColor = '#000';
+            if (range === 'optimal') scoreColor = '#28a745';
+            else if (range === 'inRange') scoreColor = '#ffd700';
+            else if (range === 'fair') scoreColor = '#ffa500';
+            else if (range === 'payAttention') scoreColor = '#ff4500';
+
+            return `
+                <div class="category">
+                    <div class="category-header">
+                        <h2>${categoryName}</h2>
+                        <div class="score" style="color: ${scoreColor}">${score}</div>
+                    </div>
+                    ${biomarkers.map(biomarker => createBiomarkerHTML(biomarker)).join('')}
+                </div>
+            `;
+        }
+
+        function createBiomarkerHTML(biomarker) {
+            const ranges = biomarker.ranges;
+            const result = biomarker.result;
+            
+            // Calculate range positions for visualization
+            let rangeMin = Math.min(...Object.values(ranges).flat());
+            let rangeMax = Math.max(...Object.values(ranges).flat());
+            
+            // Adjust range if result is outside
+            if (result < rangeMin) rangeMin = result;
+            if (result > rangeMax) rangeMax = result;
+
+            const range = rangeMax - rangeMin;
+            
+            // Calculate positions for inRange
+            const inRangeStyle = ranges.inRange ? `
+                left: ${((ranges.inRange[0] - rangeMin) / range) * 100}%;
+                width: ${((ranges.inRange[1] - ranges.inRange[0]) / range) * 100}%;
+            ` : '';
+
+            // Calculate result marker position
+            const resultPosition = ((result - rangeMin) / range) * 100;
+
+            return `
+                <div class="biomarker">
+                    <h3>${biomarker.label}</h3>
+                    <div>Current: ${result} ${biomarker.unit}</div>
+                    <div class="range-bar">
+                        ${ranges.inRange ? `<div class="range-optimal" style="${inRangeStyle}"></div>` : ''}
+                        <div class="result-marker" style="left: ${resultPosition}%"></div>
+                    </div>
+                    <div>
+                        ${ranges.inRange ? `Normal Range: ${ranges.inRange[0]}-${ranges.inRange[1]} ${biomarker.unit}` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function createSuggestionHTML(suggestion) {
+            return `
+                <div class="suggestion">
+                    <p>${suggestion.text}</p>
+                    ${suggestion.link ? `<a href="${suggestion.link}" target="_blank">Learn more</a>` : ''}
+                    <div class="tags">
+                        ${suggestion.tags ? suggestion.tags.map(tag => `<span class="tag">${tag}</span>`).join('') : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Load and process the report data when the page loads
+        window.onload = async function() {
+            try {
+                displayReport({
+  "details": {
+    "collectedDate": "2025-02-18T18:36:31.998Z",
+    "resultedDate": "2025-02-24T20:47:50.420Z"
+  },
+  "axes": [
+    {
+      "axis": "Liver Health",
+      "category": "biomarker",
+      "result": 96,
+      "range": "optimal",
+      "usersAverage": 77,
+      "description": "Liver health is essential for detoxification, metabolism, and maintaining overall balance in the body. Chronic stress or damage to the liver can impair its function, leading to metabolic imbalances and increased risk of chronic conditions.",
+      "infoLink": ""
+    },
+    {
+      "axis": "Kidney Health",
+      "category": "biomarker",
+      "result": 97,
+      "range": "optimal",
+      "usersAverage": 80,
+      "description": "Kidney health is vital for filtering waste, regulating fluids, and maintaining electrolyte balance. Impaired kidney function can lead to waste buildup, fluid imbalances, and an increased risk of chronic diseases.",
+      "infoLink": ""
+    },
+    {
+      "axis": "Heart Health",
+      "category": "biomarker",
+      "result": 72,
+      "range": "inRange",
+      "usersAverage": 76,
+      "description": "Heart health is critical for sustaining circulation and overall vitality. Imbalances in lipid levels, blood pressure, or related markers can increase the risk of cardiovascular disease and other chronic conditions.",
+      "infoLink": ""
+    },
+    {
+      "axis": "Metabolic Health",
+      "category": "biomarker",
+      "result": 81,
+      "range": "inRange",
+      "usersAverage": 84,
+      "description": "Metabolic health is key to energy regulation and overall well-being. Dysregulation in glucose, insulin, or lipid metabolism can lead to conditions like diabetes, obesity, and other chronic diseases.",
+      "infoLink": ""
+    },
+    {
+      "axis": "Thyroid Health",
+      "category": "biomarker",
+      "result": 92,
+      "range": "optimal",
+      "usersAverage": 83,
+      "description": "Thyroid health is essential for regulating metabolism, energy production, and overall hormonal balance. Dysfunction in thyroid activity can lead to imbalances affecting energy levels, weight, and overall well-being.",
+      "infoLink": ""
+    },
+    {
+      "axis": "Hormonal Health",
+      "category": "biomarker",
+      "result": 78,
+      "range": "inRange",
+      "description": "Hormonal Health is fundamental for hormonal balance, fertility, and overall well-being. Hormonal imbalances can impact energy, mood, and reproductive function, contributing to various health challenges.",
+      "infoLink": ""
+    },
+    {
+      "axis": "Inflammation",
+      "category": "biomarker",
+      "result": 56,
+      "range": "fair",
+      "usersAverage": 83,
+      "description": "Inflammation is a critical component of the body's immune response, but chronic, low-grade inflammation can contribute to aging and the development of chronic diseases. Monitoring inflammation is key to understanding and managing long-term health risks.",
+      "infoLink": ""
+    },
+    {
+      "axis": "Nutritional",
+      "category": "biomarker",
+      "result": 72,
+      "range": "inRange",
+      "usersAverage": 79,
+      "description": "Nutritional health is essential for energy production, immune function, and overall well-being. Imbalances in vitamins, minerals, or electrolytes can affect physical and mental health, highlighting the importance of proper nutrient intake and monitoring.",
+      "infoLink": ""
+    }
+  ],
+  "biomarker": [
+    {
+      "shortLabel": "APOA1",
+      "simpleLabel": "Apolipoprotein A1 (APOA1)",
+      "label": "Apolipoprotein A1 (APOA1)",
+      "heartHealth": true,
+      "targetType": "high",
+      "nonUpperRanged": true,
+      "nonNumerical": false,
+      "rawResult": 170,
+      "result": 170,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          100,
+          200
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-apoa1",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.1
+      },
+      "deviationScore": 3,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "APOB",
+      "simpleLabel": "Apolipoprotein B (APOB)",
+      "label": "Apolipoprotein B (APOB)",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 143,
+      "result": 143,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          50,
+          155
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-apob",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.3
+      },
+      "deviationScore": 44.285714285714285,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "payAttention"
+    },
+    {
+      "shortLabel": "Daytime Cortisol",
+      "simpleLabel": "Daytime Cortisol",
+      "spotLabel": "Cortisol",
+      "label": "Daytime Cortisol",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 5.7,
+      "result": 5.7,
+      "error": null,
+      "unit": "ug/dL",
+      "ranges": {
+        "inRange": [
+          2.3,
+          11.9
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-cortisol/",
+      "category": {
+        "name": "Metabolic Health",
+        "weight": 0.2
+      },
+      "deviationScore": 3.5416666666666665,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "DHEA-S",
+      "simpleLabel": "Dehydroepiandrosterone Sulfate (DHEA-S)",
+      "label": "Dehydroepiandrosterone Sulfate (DHEA-S)",
+      "targetType": "high",
+      "nonNumerical": false,
+      "rawResult": 386,
+      "result": 386,
+      "error": null,
+      "unit": "ug/dL",
+      "ranges": {
+        "inRange": [
+          106,
+          464
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-dhea-s-2/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.1
+      },
+      "deviationScore": 2.17877094972067,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "HDL Cholesterol",
+      "simpleLabel": "HDL Cholesterol",
+      "label": "HDL Cholesterol",
+      "heartHealth": true,
+      "targetType": "high",
+      "nonNumerical": false,
+      "nonUpperRanged": true,
+      "rawResult": 54,
+      "result": 54,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          23,
+          92
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-hdl-c/",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.1
+      },
+      "deviationScore": 27.536231884057973,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "fair"
+    },
+    {
+      "shortLabel": "% Hemoglobin A1C",
+      "simpleLabel": "% Hemoglobin A1C",
+      "label": "% Hemoglobin A1C",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 5.3,
+      "result": 5.3,
+      "error": null,
+      "unit": "%",
+      "ranges": {
+        "inRange": [
+          3.8,
+          6.4
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-hemoglobin-a1c/",
+      "category": {
+        "name": "Metabolic Health",
+        "weight": 0.2
+      },
+      "deviationScore": 28.84615384615384,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "High-Sensitivity CRP",
+      "simpleLabel": "High-Sensitivity CRP",
+      "label": "High-Sensitivity CRP",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 3.04,
+      "result": 3.04,
+      "error": null,
+      "unit": "mg/L",
+      "ranges": {
+        "inRange": [
+          0,
+          1.5
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-high-sensitivity-c-reactive-protein-hs-crp/",
+      "category": {
+        "name": "Inflammation",
+        "weight": 0.7
+      },
+      "deviationScore": 513.3333333333333,
+      "state": "default",
+      "labRange": "outOfRange",
+      "siphoxRange": "payAttention"
+    },
+    {
+      "shortLabel": "Homocysteine (HCY)",
+      "simpleLabel": "Homocysteine (HCY)",
+      "label": "Homocysteine (HCY)",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 10.7,
+      "result": 10.7,
+      "error": null,
+      "unit": "umol/L",
+      "ranges": {
+        "inRange": [
+          5,
+          15
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-homocysteine/",
+      "category": {
+        "name": "Inflammation",
+        "weight": 0.3
+      },
+      "deviationScore": 28.499999999999996,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "fair"
+    },
+    {
+      "shortLabel": "LDL Cholesterol",
+      "simpleLabel": "LDL Cholesterol",
+      "label": "LDL Cholesterol",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 173,
+      "result": 173,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          0,
+          130
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-ldl-c/",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.1
+      },
+      "deviationScore": 165.38461538461536,
+      "state": "default",
+      "labRange": "outOfRange",
+      "siphoxRange": "payAttention"
+    },
+    {
+      "shortLabel": "VLDL Cholesterol",
+      "simpleLabel": "VLDL Cholesterol",
+      "label": "VLDL Cholesterol",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 24.68,
+      "result": 24.68,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          5,
+          40
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/vldl ",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.0001
+      },
+      "deviationScore": 28.114285714285714,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Testosterone, Total (Males)",
+      "simpleLabel": "Testosterone, Total (Males)",
+      "label": "Testosterone, Total (Males)",
+      "targetType": "high",
+      "nonNumerical": false,
+      "nonUpperRanged": true,
+      "rawResult": 1.93,
+      "result": 1.93,
+      "error": null,
+      "unit": "ng/mL",
+      "ranges": {
+        "inRange": [
+          2.49,
+          7.81
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-testosterone/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.2
+      },
+      "deviationScore": 52.63157894736845,
+      "state": "default",
+      "labRange": "outOfRange",
+      "siphoxRange": "payAttention"
+    },
+    {
+      "shortLabel": "Testosterone, Free (calc)",
+      "simpleLabel": "Testosterone, Free (calc)",
+      "label": "Testosterone, Free (calc)",
+      "targetType": "high",
+      "nonNumerical": false,
+      "nonUpperRanged": true,
+      "hormone": true,
+      "rawResult": 0.05,
+      "result": 0.05,
+      "error": null,
+      "unit": "ng/mL",
+      "ranges": {
+        "inRange": [
+          0.03,
+          0.2
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-testosterone/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.15
+      },
+      "deviationScore": 44.117647058823536,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Free Androgen Index",
+      "simpleLabel": "Free Androgen Index (FAI)",
+      "label": "Free Androgen Index (FAI)",
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 40.3,
+      "result": 40.3,
+      "error": null,
+      "unit": "",
+      "ranges": {
+        "inRange": [
+          14,
+          126
+        ]
+      },
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.0001
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/free-androgen-index-fai",
+      "deviationScore": 13.258928571428571,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Ferritin",
+      "simpleLabel": "Ferritin",
+      "label": "Ferritin",
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 187,
+      "result": 187,
+      "error": null,
+      "unit": "ng/mL",
+      "ranges": {
+        "inRange": [
+          23.9,
+          336.2
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-ferritin/",
+      "category": {
+        "name": "Nutritional",
+        "weight": 0.2
+      },
+      "deviationScore": 1.112712135766889,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Triglycerides",
+      "simpleLabel": "Triglycerides",
+      "label": "Triglycerides",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 123,
+      "result": 123,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          50,
+          150
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-triglycerides/",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.1
+      },
+      "deviationScore": 36.5,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "fair"
+    },
+    {
+      "shortLabel": "Triglycerides:HDL Ratio",
+      "simpleLabel": "Triglycerides:HDL Ratio",
+      "label": "Triglycerides:HDL Ratio",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": null,
+      "result": 2.27,
+      "error": null,
+      "unit": "",
+      "ranges": {
+        "inRange": [
+          0,
+          3.5
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-triglyceridehdl-ratio/",
+      "category": {
+        "name": "Metabolic Health",
+        "weight": 0.2
+      },
+      "deviationScore": 32.42857142857143,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "fair"
+    },
+    {
+      "shortLabel": "Calculated Total Cholesterol",
+      "simpleLabel": "Calculated Cholesterol, Total",
+      "label": "Calculated Total Cholesterol",
+      "heartHealth": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": null,
+      "result": 251,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          125,
+          200
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-total-cholesterol/",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.0001
+      },
+      "deviationScore": 340,
+      "state": "default",
+      "labRange": "outOfRange",
+      "siphoxRange": "payAttention"
+    },
+    {
+      "shortLabel": "25-(OH) Vitamin D",
+      "simpleLabel": "25-(OH) Vitamin D",
+      "label": "25-(OH) Vitamin D",
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 23.42,
+      "result": 23.42,
+      "error": null,
+      "unit": "ng/mL",
+      "ranges": {
+        "inRange": [
+          25,
+          100
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-vitamin-d/",
+      "category": {
+        "name": "Nutritional",
+        "weight": 0.2
+      },
+      "deviationScore": 10.53333333333332,
+      "state": "default",
+      "labRange": "outOfRange",
+      "siphoxRange": "payAttention"
+    },
+    {
+      "shortLabel": "Testosterone:Cortisol Ratio",
+      "simpleLabel": "Testosterone:Cortisol Ratio",
+      "label": "Testosterone:Cortisol Ratio",
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": null,
+      "result": 0.033,
+      "error": null,
+      "unit": "",
+      "ranges": {
+        "inRange": [
+          0.02,
+          0.1
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-testosteronecortisol-ratio/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.05
+      },
+      "deviationScore": 16.875,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "ApoB:ApoA1 Ratio",
+      "simpleLabel": "ApoB:ApoA1 Ratio",
+      "label": "ApoB:ApoA1 Ratio",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": null,
+      "result": 0.84,
+      "error": null,
+      "unit": "",
+      "ranges": {
+        "inRange": [
+          0,
+          0.9
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-apobapoa1-ratio/",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.05
+      },
+      "deviationScore": 46.666666666666664,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Total Cholesterol:HDL Ratio",
+      "simpleLabel": "Total Cholesterol:HDL Ratio",
+      "label": "Total Cholesterol:HDL Ratio",
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": null,
+      "result": 4.64,
+      "error": null,
+      "unit": "",
+      "ranges": {
+        "inRange": [
+          0,
+          5
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-total-cholesterolhdl-ratio/",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.05
+      },
+      "deviationScore": 46.4,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "TSH",
+      "simpleLabel": "Thyroid Stimulating Hormone (TSH)",
+      "label": "Thyroid Stimulating Hormone (TSH)",
+      "heartHealth": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 1.45,
+      "result": 1.45,
+      "error": null,
+      "unit": "uIU/mL",
+      "ranges": {
+        "inRange": [
+          0.45,
+          5.33
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-thyroid-stimulating-hormone-tsh/",
+      "category": {
+        "name": "Thyroid Health",
+        "weight": 0.4
+      },
+      "deviationScore": 2.950819672131148,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "Estradiol (Sensitive)",
+      "simpleLabel": "Estradiol (Sensitive)",
+      "label": "Estradiol (Sensitive)",
+      "hormone": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 26.1,
+      "result": 26.1,
+      "error": null,
+      "unit": "pg/mL",
+      "ranges": {
+        "inRange": [
+          0,
+          47
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-estradiol-e2/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.05
+      },
+      "deviationScore": 2.765957446808512,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "LH",
+      "simpleLabel": "Luteinizing Hormone (LH)",
+      "label": "Luteinizing Hormone (LH)",
+      "hormone": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 2.29,
+      "result": 2.29,
+      "error": null,
+      "unit": "mIU/mL",
+      "ranges": {
+        "inRange": [
+          1.24,
+          8.62
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-luteinizing-hormone-lh/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.05
+      },
+      "deviationScore": 3.577235772357724,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "SHBG",
+      "simpleLabel": "Sex Hormone-Binding Globulin (SHBG)",
+      "label": "Sex Hormone-Binding Globulin (SHBG)",
+      "hormone": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 16.6,
+      "result": 16.6,
+      "error": null,
+      "unit": "nmol/L",
+      "ranges": {
+        "inRange": [
+          13.3,
+          89.5
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-sex-hormone-binding-globulin-shbg/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.05
+      },
+      "deviationScore": 22.83464566929134,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "PRL",
+      "simpleLabel": "Prolactin (PRL)",
+      "label": "Prolactin (PRL)",
+      "hormone": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 6.32,
+      "result": 6.32,
+      "error": null,
+      "unit": "ng/mL",
+      "ranges": {
+        "inRange": [
+          2.64,
+          13.13
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-prolactin-prl/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.05
+      },
+      "deviationScore": 3.508102955195424,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "FSH",
+      "simpleLabel": "Follicle-Stimulating Hormone (FSH)",
+      "label": "Follicle-Stimulating Hormone (FSH)",
+      "hormone": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 3.74,
+      "result": 3.74,
+      "error": null,
+      "unit": "mIU/mL",
+      "ranges": {
+        "inRange": [
+          1.27,
+          19.26
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-follicle-stimulating-hormone-fsh/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.05
+      },
+      "deviationScore": 18.135075041689827,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "PSA",
+      "simpleLabel": "Prostate-Specific Antigen (PSA)",
+      "label": "Prostate-Specific Antigen (PSA)",
+      "hormone": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "rawResult": 0.73,
+      "result": 0.73,
+      "error": null,
+      "unit": "ng/mL",
+      "ranges": {
+        "inRange": [
+          0,
+          4
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-prostate-specific-antigen-psa/",
+      "category": {
+        "name": "Hormonal Health",
+        "weight": 0.2
+      },
+      "deviationScore": 1.8250000000000002,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "Albumin",
+      "simpleLabel": "Albumin",
+      "label": "Albumin",
+      "hormone": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 4.87,
+      "result": 4.87,
+      "error": null,
+      "unit": "g/dL",
+      "ranges": {
+        "inRange": [
+          3.5,
+          5.7
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-albumin/",
+      "category": {
+        "name": "Metabolic Health",
+        "weight": 0.05
+      },
+      "deviationScore": 1.2272727272727293,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "T4 (free)",
+      "simpleLabel": "Free Thyroxine (Free T4)",
+      "label": "Free Thyroxine (Free T4)",
+      "thyroid": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 0.86,
+      "result": 0.86,
+      "error": null,
+      "unit": "ng/dL",
+      "ranges": {
+        "inRange": [
+          0.59,
+          1.22
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-free-t4/",
+      "category": {
+        "name": "Thyroid Health",
+        "weight": 0.2
+      },
+      "deviationScore": 3.5714285714285747,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "T3 (free)",
+      "simpleLabel": "Free triiodothyronine (Free T3)",
+      "label": "Free triiodothyronine (Free T3)",
+      "thyroid": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 3,
+      "result": 3,
+      "error": null,
+      "unit": "pg/mL",
+      "ranges": {
+        "inRange": [
+          1.9,
+          4.4
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-free-t3/",
+      "category": {
+        "name": "Thyroid Health",
+        "weight": 0.2
+      },
+      "deviationScore": 3.0000000000000067,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "TPOAb",
+      "simpleLabel": "Thyroperoxidase Antibody (TPOAb)",
+      "label": "Thyroperoxidase Antibody (TPOAb)",
+      "thyroid": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": "<.25",
+      "result": 0.24,
+      "error": null,
+      "unit": "IU/mL",
+      "ranges": {
+        "inRange": [
+          0,
+          9
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-thyroid-peroxidase-antibody-tpoab/",
+      "category": {
+        "name": "Thyroid Health",
+        "weight": 0.2
+      },
+      "deviationScore": 4.733333333333333,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "ALT",
+      "simpleLabel": "Alanine Aminotransferase (ALT)",
+      "label": "Alanine Aminotransferase (ALT)",
+      "heartHealth": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "nonUpperRanged": false,
+      "rawResult": 19,
+      "result": 19,
+      "error": null,
+      "unit": "U/L",
+      "ranges": {
+        "inRange": [
+          11,
+          52
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-alt/",
+      "category": {
+        "name": "Liver Health",
+        "weight": 0.4
+      },
+      "deviationScore": 3.048780487804878,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "AST",
+      "simpleLabel": "Aspartate Aminotransferase (AST)",
+      "label": "Aspartate Aminotransferase (AST)",
+      "heartHealth": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "nonUpperRanged": false,
+      "rawResult": 27,
+      "result": 27,
+      "error": null,
+      "unit": "U/L",
+      "ranges": {
+        "inRange": [
+          13,
+          39
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-ast/",
+      "category": {
+        "name": "Liver Health",
+        "weight": 0.3
+      },
+      "deviationScore": 1.9230769230769231,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "eGFR",
+      "simpleLabel": "eGFR",
+      "label": "eGFR",
+      "heartHealth": true,
+      "targetType": "high",
+      "nonNumerical": false,
+      "nonUpperRanged": true,
+      "rawResult": 100,
+      "result": 100,
+      "error": null,
+      "unit": "mL/min/1.73 m2",
+      "ranges": {
+        "inRange": [
+          60,
+          120
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-egfr/",
+      "category": {
+        "name": "Kidney Health",
+        "weight": 0.5
+      },
+      "deviationScore": 3.333333333333333,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "optimal"
+    },
+    {
+      "shortLabel": "Creatinine",
+      "simpleLabel": "Creatinine",
+      "label": "Creatinine",
+      "heartHealth": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "nonUpperRanged": false,
+      "rawResult": 1.01,
+      "result": 1.01,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          0.7,
+          1.3
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-creatinine/",
+      "category": {
+        "name": "Kidney Health",
+        "weight": 0.25
+      },
+      "deviationScore": 0.833333333333334,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Cystatin C",
+      "simpleLabel": "Cystatin C",
+      "label": "Cystatin C",
+      "targetType": "range",
+      "nonNumerical": false,
+      "rawResult": 0.69,
+      "result": 0.69,
+      "error": null,
+      "unknown": true,
+      "unit": "mg/mL",
+      "ranges": {
+        "inRange": [
+          0.53,
+          1.01
+        ]
+      },
+      "infoLink": "https://siphox.notion.site/Cystatin-C-19792984f9b880608d5de01716fad7dd?pvs=4",
+      "category": {
+        "name": "Kidney Health",
+        "weight": 0.001
+      },
+      "deviationScore": 8.333333333333341,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Lipoprotein (a)",
+      "simpleLabel": "Lipoprotein (a)",
+      "label": "Lipoprotein (a)",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "nonUpperRanged": false,
+      "rawResult": "<5.44",
+      "result": 5.17,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          10,
+          30
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-lpa/",
+      "category": {
+        "name": "Heart Health",
+        "weight": 0.2
+      },
+      "deviationScore": 120.75,
+      "state": "default",
+      "labRange": "outOfRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Blood Urea Nitrogen (BUN)",
+      "simpleLabel": "Blood Urea Nitrogen (BUN)",
+      "label": "Blood Urea Nitrogen (BUN)",
+      "heartHealth": true,
+      "targetType": "low",
+      "nonNumerical": false,
+      "nonUpperRanged": false,
+      "rawResult": 13.2,
+      "result": 13.2,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          7,
+          25
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-bun/",
+      "category": {
+        "name": "Kidney Health",
+        "weight": 0.25
+      },
+      "deviationScore": 17.222222222222218,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Glucose",
+      "simpleLabel": "Fasting Glucose",
+      "label": "Fasting Glucose",
+      "heartHealth": true,
+      "targetType": "range",
+      "nonNumerical": false,
+      "nonUpperRanged": false,
+      "rawResult": 62,
+      "result": 62,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          70,
+          105
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-fasting-glucose/",
+      "category": {
+        "name": "Metabolic Health",
+        "weight": 0.1
+      },
+      "deviationScore": 114.28571428571429,
+      "state": "default",
+      "labRange": "outOfRange",
+      "siphoxRange": "good"
+    },
+    {
+      "shortLabel": "Bilirubin",
+      "simpleLabel": "Total Bilirubin",
+      "label": "Total Bilirubin",
+      "heartHealth": false,
+      "targetType": "range",
+      "nonNumerical": false,
+      "nonUpperRanged": false,
+      "rawResult": 0.7,
+      "result": 0.7,
+      "error": null,
+      "unit": "mg/dL",
+      "ranges": {
+        "inRange": [
+          0.3,
+          1
+        ]
+      },
+      "infoLink": "https://siphoxhealth.com/hub/biomarkers-2/biomarker-bilirubin/",
+      "category": {
+        "name": "Liver Health",
+        "weight": 0.3
+      },
+      "deviationScore": 3.5714285714285747,
+      "state": "default",
+      "labRange": "inRange",
+      "siphoxRange": "good"
+    }
+  ],
+  "unknownBiomarkers": [],
+  "incorrectUnitBiomarkers": [],
+  "additionalData": {},
+  "wearable": [],
+  "suggestions": [
+    {
+      "_id": "65f2fc719ef5a6ca455de65f",
+      "text": "Fenugreek extract supplementation has demonstrated a significant effect on increasing total serum testosterone in men, according to some studies.",
+      "link": "https://pubmed.ncbi.nlm.nih.gov/32048383/",
+      "category": "Testosterone, Total (Males)",
+      "createdAt": "2024-03-14T13:32:33.385Z",
+      "updatedAt": "2025-03-18T14:32:50.136Z",
+      "__v": 0,
+      "businessKey": null,
+      "group": "EXTERNAL_SUPPLEMENTS",
+      "tags": [
+        "Testosterone, Total (Males)"
+      ],
+      "linkTitle": "",
+      "longDescription": "",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "Fenugreek can help improve testosterone",
+      "placement": {
+        "position": "action",
+        "biomarker": "Testosterone, Total (Males)"
+      },
+      "actionPlanType": "",
+      "important": false,
+      "questions": [],
+      "questionsTexts": [],
+      "isDeprecated": false,
+      "lastUpdatedBy": "megha.sama@siphox.com",
+      "links": [],
+      "richText": "",
+      "suggestionsToAdd": [],
+      "settings": [
+        [
+          {
+            "biomarker": "Testosterone, Total (Males)",
+            "range": "low"
+          }
+        ]
+      ]
+    },
+    {
+      "_id": "657a22be063d581f61db2465",
+      "text": "Incorporating calcium-rich foods like yogurt, cheese, milk, or sardines into your meals can reduce iron absorption and potentially lower ferritin levels. If ferritin remains high despite these changes, consult your healthcare provider to investigate other potential causes.",
+      "link": "https://europepmc.org/article/med/1600930/reload=0",
+      "category": "Ferritin",
+      "createdAt": "2023-12-13T21:31:42.664Z",
+      "updatedAt": "2024-12-04T19:04:17.226Z",
+      "__v": 1,
+      "tags": [
+        "Ferritin"
+      ],
+      "businessKey": null,
+      "group": "NUTRITION_ACTION",
+      "linkTitle": "Calcium and iron absorption",
+      "longDescription": "",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "Incorporate calcium-rich foods into your diet",
+      "placement": {
+        "position": "action"
+      },
+      "actionPlanType": "",
+      "settings": [
+        [
+          {
+            "biomarker": "Ferritin",
+            "range": "high"
+          }
+        ]
+      ]
+    },
+    {
+      "_id": "6658a9e760b92f2011eef581",
+      "text": "Blood glucose below normal can cause fatigue, heart palpitations, or focus problems. Symptoms worsen if it drops further. Consult a healthcare provider if you are concerned about your levels.",
+      "link": "https://www.mayoclinic.org/diseases-conditions/hypoglycemia/symptoms-causes/syc-20373685",
+      "category": "Glucose",
+      "tags": [
+        "Fasting Glucose"
+      ],
+      "createdAt": "2024-05-30T16:31:35.878Z",
+      "updatedAt": "2025-03-21T14:57:16.625Z",
+      "__v": 0,
+      "businessKey": null,
+      "group": "ADDITIONAL_TESTS",
+      "linkTitle": "",
+      "longDescription": "",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "Low Blood Sugar (Hypoglycemia)",
+      "placement": {
+        "position": "inline",
+        "biomarker": "Fasting Glucose"
+      },
+      "actionPlanType": "",
+      "settings": [
+        [
+          {
+            "biomarker": "Fasting Glucose",
+            "range": [
+              0,
+              "65"
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "_id": "62dcd252191557fd35b48365",
+      "text": "Consuming 2-3 fish meals per week or taking 1000 mg of omega-3 fish oil daily may raise HDL-C levels, improving your cardiovascular health.",
+      "link": "https://www.umassmed.edu/nutrition/Cardiovascular/handouts/raising-hdl/.",
+      "category": "HDL Cholesterol",
+      "settings": [
+        [
+          {
+            "biomarker": "HDL Cholesterol",
+            "range": [
+              40,
+              60
+            ]
+          }
+        ]
+      ],
+      "updatedAt": "2025-03-11T16:18:54.990Z",
+      "businessKey": null,
+      "group": "NUTRITION_ACTION",
+      "tags": [
+        "HDL Cholesterol"
+      ],
+      "linkTitle": "",
+      "longDescription": "",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "Try increasing your omega-3 intake",
+      "placement": {
+        "position": "action"
+      },
+      "actionPlanType": "",
+      "important": false,
+      "questions": [],
+      "questionsTexts": []
+    },
+    {
+      "_id": "660e109824e1f7fb89316088",
+      "text": "High-intensity training (4-minute intervals x 4 at 85-95% of maximum heart rate with 4 minutes rest, twice per week) reduced cholesterol plaque size in heart vessels after 6 months by improving ApoB and LDL-C levels, compared to general exercise, according to a study of 60 patients.",
+      "link": "https://academic.oup.com/eurjpc/article/30/5/384/6958432?login=false#399808977",
+      "category": "Apolipoprotein B (APOB)",
+      "createdAt": "2024-04-04T02:29:44.988Z",
+      "updatedAt": "2024-12-04T18:56:09.118Z",
+      "__v": 0,
+      "businessKey": null,
+      "group": "LIFESTYLE_ACTION",
+      "tags": [
+        "LDL Cholesterol",
+        "Apolipoprotein B (APOB)"
+      ],
+      "linkTitle": "",
+      "longDescription": "",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "Try HIIT",
+      "placement": {
+        "position": "action"
+      },
+      "actionPlanType": "",
+      "settings": [
+        [
+          {
+            "biomarker": "Apolipoprotein B (APOB)",
+            "range": [
+              "100",
+              "130"
+            ]
+          }
+        ],
+        [
+          {
+            "biomarker": "LDL Cholesterol",
+            "range": "high"
+          }
+        ]
+      ]
+    },
+    {
+      "_id": "67a812caf4d7e482304b3ede",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "",
+      "text": "",
+      "longDescription": "",
+      "link": "",
+      "linkTitle": "",
+      "category": "High-Sensitivity CRP",
+      "group": "LIFESTYLE_ACTION",
+      "businessKey": "siphox",
+      "actionPlanType": "",
+      "placement": {
+        "position": "inline",
+        "biomarker": "High-Sensitivity CRP"
+      },
+      "tags": [
+        "High-Sensitivity CRP"
+      ],
+      "questions": [
+        {
+          "type": "single-answer",
+          "question": "Did you experience any cold/flu symptoms or digestive issues shortly before or after taking your test?",
+          "answers": [
+            {
+              "answer": "Yes",
+              "_id": "67a812caf4d7e482304b3ee0",
+              "createdAt": "2025-02-12T13:34:16.161Z",
+              "updatedAt": "2025-02-12T13:34:16.161Z"
+            },
+            {
+              "answer": "No",
+              "_id": "67a812caf4d7e482304b3ee1",
+              "createdAt": "2025-02-12T13:34:16.161Z",
+              "updatedAt": "2025-02-12T13:34:16.161Z"
+            }
+          ],
+          "key": "0.04661697762175976",
+          "_id": "67a812caf4d7e482304b3edf",
+          "createdAt": "2025-02-12T13:34:16.161Z",
+          "updatedAt": "2025-02-12T13:34:16.161Z"
+        }
+      ],
+      "questionsTexts": [
+        {
+          "index": "0",
+          "text": "Elevated hsCRP values and recently experienced cold, flu, or digestive symptoms, suggest that your body may have been responding to inflammation or infection at the time of the test. HsCRP is a general marker of inflammation, so temporary increases are common during illness, inflammation, or recovery. If needed, we recommend retesting once you're fully recovered to get a clearer picture of your hsCRP levels.",
+          "additionalInsights": [],
+          "_id": "67a812caf4d7e482304b3ee2"
+        },
+        {
+          "index": "1",
+          "text": "HsCRP is a marker of inflammation in the body, but it does not identify the specific cause of that inflammation. Elevated levels of HsCRP can arise from various factors, including chronic stress, a mild asymptomatic immune response, injuries, or certain lifestyle choices such as smoking. We have added several suggestions to your action plan to decrease these levels. SiPhox tests are effective tools for monitoring HsCRP levels and tracking changes over time. ",
+          "additionalInsights": [
+            "630d2ea74e6b5f609810a332",
+            "65e8d31dd3ec11ae1e1384d7"
+          ],
+          "_id": "67a812caf4d7e482304b3ee3"
+        }
+      ],
+      "important": false,
+      "createdAt": "2025-02-09T02:28:26.642Z",
+      "updatedAt": "2025-02-12T13:34:16.161Z",
+      "__v": 0,
+      "settings": []
+    },
+    {
+      "_id": "64ef54cd5dfa1ee387dd06ca",
+      "text": "Fatty fish such as wild-caught salmon is a great source of vitamin D!",
+      "link": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2912737/",
+      "category": "Vit D",
+      "createdAt": "2023-08-30T14:40:13.468Z",
+      "updatedAt": "2025-03-07T20:20:57.387Z",
+      "__v": 1,
+      "tags": [
+        "25-(OH) Vitamin D"
+      ],
+      "businessKey": null,
+      "group": "NUTRITION_ACTION",
+      "linkTitle": "",
+      "longDescription": "",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "Consume more fatty fish",
+      "placement": {
+        "position": "action"
+      },
+      "actionPlanType": "",
+      "important": false,
+      "questions": [],
+      "questionsTexts": [],
+      "settings": [
+        [
+          {
+            "biomarker": "25-(OH) Vitamin D",
+            "range": "low"
+          }
+        ]
+      ]
+    },
+    {
+      "_id": "67452932da5b964c0fdf9dc9",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "Rapid Triglyceride Change",
+      "text": "Your triglyceride levels have changed rapidly, which is uncommon as triglycerides usually do not fluctuate quickly. This could be due to certain medications or a potential lab error, so we recommend retesting to confirm the result and ensure accuracy.",
+      "longDescription": "",
+      "link": "",
+      "linkTitle": "",
+      "category": "Triglycerides",
+      "group": "ADDITIONAL_TESTS",
+      "placement": {
+        "position": "inline",
+        "biomarker": "Triglycerides"
+      },
+      "tags": [
+        "Triglycerides"
+      ],
+      "createdAt": "2024-11-26T01:49:38.277Z",
+      "updatedAt": "2025-03-21T14:57:16.625Z",
+      "__v": 0,
+      "actionPlanType": "",
+      "businessKey": null,
+      "important": false,
+      "questions": [],
+      "questionsTexts": [],
+      "settings": []
+    },
+    {
+      "_id": "675b228400a04a7ff7203075",
+      "programs": [
+        "WELLNESS"
+      ],
+      "title": "Low Lp(a) Levels",
+      "text": "Lp(a) under 10 mg/dL suggests lower genetic heart risk, but some studies link very low Lp(a) to type 2 diabetes or NAFLD risk. See your action plan for suggestions.",
+      "longDescription": "",
+      "link": "https://www.acc.org/Latest-in-Cardiology/Journal-Scans/2021/03/29/17/56/Low-Lipoproteina-Levels-and-Risk",
+      "linkTitle": "",
+      "category": "Lp(a)",
+      "group": "INFORMATIONAL",
+      "actionPlanType": "",
+      "placement": {
+        "position": "inline",
+        "biomarker": "Lipoprotein (a)"
+      },
+      "tags": [
+        "Lipoprotein (a) (nmol/L)"
+      ],
+      "createdAt": "2024-12-12T17:51:00.807Z",
+      "updatedAt": "2025-03-21T14:57:16.625Z",
+      "__v": 0,
+      "businessKey": null,
+      "important": false,
+      "questions": [],
+      "questionsTexts": [],
+      "isDeprecated": true,
+      "lastUpdatedBy": "megha.sama@siphox.com",
+      "links": [],
+      "richText": "",
+      "suggestionsToAdd": [],
+      "settings": [
+        [
+          {
+            "biomarker": "Lipoprotein (a)",
+            "range": [
+              "0",
+              9.8
+            ]
+          }
+        ]
+      ]
+    }
+  ],
+  "actionsState": [],
+  "encryptedId": "d149808fb7344e793889df9e01e83b25"
+});
+            } catch (error) {
+                console.error('Error loading report data:', error);
+                document.getElementById('categories').innerHTML = '<p>Error loading report data</p>';
+            }
+        };
+    </script>
+</head>
+<body>
+    <h1>Health Report</h1>
+    <div id="categories"></div>
+    <div class="suggestions">
+        <h2>Recommendations</h2>
+        <div id="suggestions"></div>
+    </div>
+</body>
+</html>
